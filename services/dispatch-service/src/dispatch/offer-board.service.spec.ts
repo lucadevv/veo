@@ -1439,6 +1439,115 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
     expect(board?.bidCents).toBe(900);
   });
 
+  it('reopenBoard conserva specialRequests + waypointCount del EVENTO aunque la key del board ya no exista (cierre del follow-up BE-2/Ola 2B)', async () => {
+    const c = await ctx();
+    const tripId = await openBoard(c, 1, 700);
+    const expiresAt = (await c.store.getBoard(tripId))?.expiresAt ?? 0;
+    // El caso CANÓNICO del reassigning: el conductor cancela minutos después de aceptar y la key del
+    // board ya EXPIRÓ por TTL de Redis → el board se rearma SOLO con el payload del evento.
+    c.store.__danglingDrop(tripId, expiresAt);
+    expect(await c.store.getBoard(tripId)).toBeNull();
+
+    await c.svc.reopenBoard({
+      tripId,
+      driverId: 'drv-cancel',
+      passengerId: PASSENGER,
+      vehicleType: VehicleType.CAR,
+      origin: ORIGIN,
+      destination: DEST,
+      distanceMeters: DIST_METERS,
+      durationSeconds: DUR_SECONDS,
+      // El evento YA transporta las solicitudes y las paradas (row Trip fresco del emisor).
+      specialRequests: [SpecialRequest.PET, SpecialRequest.LUGGAGE],
+      waypoints: [
+        { lat: -12.05, lon: -77.03 },
+        { lat: -12.06, lon: -77.02 },
+      ],
+      bidCents: 900,
+      negotiationSeq: 2,
+    });
+    const board = await c.store.getBoard(tripId);
+    expect(board?.status).toBe('OPEN');
+    // ANTES degradaban a []/0 (el evento no los transportaba): el conductor del re-match veía MENOS info.
+    expect(board?.specialRequests).toEqual([SpecialRequest.PET, SpecialRequest.LUGGAGE]);
+    expect(board?.waypointCount).toBe(2);
+  });
+
+  it('reopenBoard compat N-2: un reassigning VIEJO sin los campos preserva specialRequests/waypointCount del board previo si sobrevivió', async () => {
+    const c = await ctx();
+    const tripId = 'trip-1';
+    c.windows.bidWindowSec = 60;
+    await c.svc.openBoard({
+      tripId,
+      passengerId: PASSENGER,
+      bidCents: 700,
+      vehicleType: VehicleType.CAR,
+      origin: ORIGIN,
+      destination: DEST,
+      distanceMeters: DIST_METERS,
+      durationSeconds: DUR_SECONDS,
+      windowSec: 60,
+      negotiationSeq: 1,
+      specialRequests: [SpecialRequest.CHILD_SEAT],
+      waypoints: [{ lat: -12.05, lon: -77.03 }],
+    });
+
+    // Evento viejo SIN specialRequests/waypoints (compat N-2) con el board previo aún vivo.
+    await c.svc.reopenBoard({
+      tripId,
+      driverId: 'drv-cancel',
+      passengerId: PASSENGER,
+      vehicleType: VehicleType.CAR,
+      origin: ORIGIN,
+      destination: DEST,
+      distanceMeters: DIST_METERS,
+      durationSeconds: DUR_SECONDS,
+      bidCents: 700,
+      negotiationSeq: 2,
+    });
+    const board = await c.store.getBoard(tripId);
+    expect(board?.specialRequests).toEqual([SpecialRequest.CHILD_SEAT]);
+    expect(board?.waypointCount).toBe(1);
+  });
+
+  it('reopenBoard: con board previo vivo Y campos en el evento, gana el EVENTO (row Trip fresco: una parada aceptada post-accept cuenta)', async () => {
+    const c = await ctx();
+    const tripId = 'trip-1';
+    c.windows.bidWindowSec = 60;
+    // Board original SIN paradas (el pasajero pidió directo).
+    await c.svc.openBoard({
+      tripId,
+      passengerId: PASSENGER,
+      bidCents: 700,
+      vehicleType: VehicleType.CAR,
+      origin: ORIGIN,
+      destination: DEST,
+      distanceMeters: DIST_METERS,
+      durationSeconds: DUR_SECONDS,
+      windowSec: 60,
+      negotiationSeq: 1,
+    });
+
+    // Entre el accept y el cancel se aceptó una parada: el evento (row Trip fresco) trae 1 waypoint.
+    await c.svc.reopenBoard({
+      tripId,
+      driverId: 'drv-cancel',
+      passengerId: PASSENGER,
+      vehicleType: VehicleType.CAR,
+      origin: ORIGIN,
+      destination: DEST,
+      distanceMeters: DIST_METERS,
+      durationSeconds: DUR_SECONDS,
+      specialRequests: [],
+      waypoints: [{ lat: -12.055, lon: -77.025 }],
+      bidCents: 700,
+      negotiationSeq: 2,
+    });
+    const board = await c.store.getBoard(tripId);
+    expect(board?.waypointCount).toBe(1);
+    expect(board?.specialRequests).toEqual([]);
+  });
+
   it('reopenBoard PURGA las ofertas de la ventana previa (N4: no sobrevive un COUNTER rancio)', async () => {
     const c = await ctx();
     const tripId = await openBoard(c, 1, 700);

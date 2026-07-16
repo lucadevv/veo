@@ -689,11 +689,20 @@ export const tripReassigning = z.object({
   /// Origen del viaje (geo): centro del broadcast a conductores elegibles cercanos.
   origin: geo,
   /// Destino + distancia/duración del viaje: el board re-abierto los conserva para que el conductor del
-  /// re-match VEA pickup→destino + distancia igual que en la puja original (cierra el MISMO gap que tenía
-  /// specialRequests, que no viajaba en reassigning y se degradaba a [] al reconstruir el board). Del row Trip.
+  /// re-match VEA pickup→destino + distancia igual que en la puja original. Del row Trip.
   destination: geo,
   distanceMeters: z.number().int().nonnegative(),
   durationSeconds: z.number().int().nonnegative(),
+  /// BE-2 · solicitudes especiales del pasajero (mascota/equipaje/silla), mismo contrato que bid_posted:
+  /// el board re-abierto las conserva AUNQUE se rearme SOLO desde este evento (la key previa de Redis
+  /// expira por TTL ~90s y el conductor puede cancelar minutos después). Opcional/compat N-2: reassigning
+  /// previos sin el campo ⇒ dispatch degrada a [] (el comportamiento histórico).
+  specialRequests: z.array(z.enum(['PET', 'LUGGAGE', 'CHILD_SEAT'])).optional(),
+  /// Ola 2B · paradas intermedias ORDENADAS (máx 3), del row Trip FRESCO al momento del cancel (incluye
+  /// una parada aceptada POST-accept que el board original no vio). dispatch persiste SOLO el conteo en el
+  /// board re-abierto (need-to-know pre-aceptación: cero coordenadas de paradas a conductores no
+  /// asignados). Opcional/compat N-2: ausente ⇒ dispatch degrada a 0 (el comportamiento histórico).
+  waypoints: z.array(geo).max(3).optional(),
   bidCents: z.number().int().positive(),
   reason: z.enum(['driver_cancelled']),
   /// H13 — secuencia MONOTÓNICA del NUEVO ciclo de negociación que abre esta reasignación (trip la

@@ -1649,6 +1649,10 @@ describe('TripsService.cancel · PUJA · conductor cancela post-accept → REASS
         originLat: -12.05,
         originLon: -77.04,
         fareCents: 900,
+        // BE-2 + Ola 2B — el row Trip trae solicitudes y paradas: el evento debe transportarlas para que
+        // el board re-abierto no degrade a []/0 al rearmarse solo desde el evento (key previa expirada).
+        specialRequests: ['PET'],
+        waypoints: [{ lat: -12.07, lon: -77.03 }],
       }),
     );
     const svc = new TripsService(new TripsRepository(prisma as never), maps);
@@ -1668,6 +1672,8 @@ describe('TripsService.cancel · PUJA · conductor cancela post-accept → REASS
       origin: { lat: number; lon: number };
       bidCents: number;
       reason: string;
+      specialRequests: string[];
+      waypoints: { lat: number; lon: number }[];
     };
     expect(payload.bidCents).toBe(900); // re-abre al bid actual
     expect(payload.reason).toBe('driver_cancelled');
@@ -1676,6 +1682,10 @@ describe('TripsService.cancel · PUJA · conductor cancela post-accept → REASS
     expect(payload.passengerId).toBe('pax-9');
     expect(payload.vehicleType).toBe('MOTO');
     expect(payload.origin).toEqual({ lat: -12.05, lon: -77.04 });
+    // BE-2 + Ola 2B — solicitudes + paradas del row Trip FRESCO viajan en el evento (cierre del follow-up
+    // "reassigning no las transportaba": el board reconstruido degradaba a []/0).
+    expect(payload.specialRequests).toEqual(['PET']);
+    expect(payload.waypoints).toEqual([{ lat: -12.07, lon: -77.03 }]);
     // NO se emitió trip.cancelled (el viaje no terminó).
     expect(prisma._outbox.some((e) => e.eventType === 'trip.cancelled')).toBe(false);
     // El conductor que canceló se desvinculó (driverId → null) para el re-match.

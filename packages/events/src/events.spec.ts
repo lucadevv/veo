@@ -475,6 +475,24 @@ describe('PUJA / negociación (ADR 010 §4)', () => {
     expect(
       EVENT_SCHEMAS['trip.reassigning'].safeParse({ ...ok, dispatchMode: 'CARPOOL' }).success,
     ).toBe(false);
+    // BE-2 + Ola 2B — transporta specialRequests + waypoints (mismo contrato que bid_posted) para que el
+    // board re-abierto NO degrade a []/0 al rearmarse solo desde el evento. Opcionales (compat N-2),
+    // enum cerrado de solicitudes, máx 3 paradas.
+    expect(
+      EVENT_SCHEMAS['trip.reassigning'].safeParse({
+        ...ok,
+        specialRequests: ['PET', 'LUGGAGE'],
+        waypoints: [{ lat: -12.05, lon: -77.03 }],
+      }).success,
+    ).toBe(true);
+    expect(
+      EVENT_SCHEMAS['trip.reassigning'].safeParse({ ...ok, specialRequests: ['SURFBOARD'] })
+        .success,
+    ).toBe(false);
+    const wp = { lat: -12.05, lon: -77.03 };
+    expect(
+      EVENT_SCHEMAS['trip.reassigning'].safeParse({ ...ok, waypoints: [wp, wp, wp, wp] }).success,
+    ).toBe(false);
   });
 
   it('pricing.mode_schedule_updated: acepta snapshot válido, rechaza mode/dayMask/minuto fuera de rango (ADR 011)', () => {
