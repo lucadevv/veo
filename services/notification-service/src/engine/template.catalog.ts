@@ -44,6 +44,11 @@ export const TEMPLATE_KEYS = {
   DRIVER_APPROVED: 'driver.approved',
   DRIVER_REJECTED: 'driver.rejected',
   DOCUMENT_REJECTED: 'fleet.document_rejected',
+  BOOKING_REQUESTED: 'booking.requested',
+  BOOKING_APPROVED: 'booking.approved',
+  BOOKING_REJECTED: 'booking.rejected',
+  BOOKING_EXPIRED: 'booking.expired',
+  BOOKING_CONFIRMED: 'booking.confirmed',
 } as const;
 
 /** Key TIPADA del catálogo: referenciar un template inexistente no compila. */
@@ -65,7 +70,9 @@ export type InboxCategory = 'trip' | 'safety' | 'payment' | 'promo' | 'general';
 
 /** Deriva la categoría de bandeja a partir de la FAMILIA de la key (prefijo), no de la key exacta. */
 export function categoryForTemplate(key: string): InboxCategory {
-  if (key.startsWith('trip.') || key.startsWith('chat.')) return 'trip';
+  // booking.* = reservas del carpooling (ADR-014): mismo tono/ícono de viaje que trip.* en la bandeja.
+  if (key.startsWith('trip.') || key.startsWith('chat.') || key.startsWith('booking.'))
+    return 'trip';
   if (key.startsWith('panic.') || key.startsWith('contact.')) return 'safety';
   if (key.startsWith('payment.') || key.startsWith('payout.')) return 'payment';
   if (key.startsWith('promo.')) return 'promo';
@@ -372,5 +379,47 @@ export const DEFAULT_TEMPLATES: TemplateSeed[] = [
     locale: LOCALE,
     subject: 'Revisá tu documento',
     body: 'Uno de tus documentos necesita correcciones. Abre VEO para ver cuál y volver a enviarlo.',
+  },
+  {
+    // Push al CONDUCTOR dueño de la oferta de carpooling: un pasajero pidió reservar (ADR-014 §7.1,
+    // "tenés una solicitud"). El monto es el precio acordado; la app resuelve el detalle (sin PII, §0.7).
+    key: TEMPLATE_KEYS.BOOKING_REQUESTED,
+    channel: NotificationChannel.PUSH,
+    locale: LOCALE,
+    subject: 'Tienes una solicitud de reserva',
+    body: 'Un pasajero quiere reservar en tu viaje por S/{{amount}}. Respondele antes de que expire.',
+  },
+  {
+    // Push al PASAJERO cuando el CONDUCTOR aprueba su solicitud (ADR-014 §7.1, "aprobado, cobrando").
+    // Solo origen APROBACION_CONDUCTOR: en INSTANT_BOOKING el pasajero acaba de reservar y ya lo ve en la app.
+    key: TEMPLATE_KEYS.BOOKING_APPROVED,
+    channel: NotificationChannel.PUSH,
+    locale: LOCALE,
+    subject: 'Reserva aprobada',
+    body: 'El conductor aprobo tu reserva. Estamos procesando tu pago de S/{{amount}}.',
+  },
+  {
+    // Push HONESTO al PASAJERO: el conductor no aceptó. No se movió plata (charge-on-approval, nunca se aprobó).
+    key: TEMPLATE_KEYS.BOOKING_REJECTED,
+    channel: NotificationChannel.PUSH,
+    locale: LOCALE,
+    subject: 'Solicitud no aceptada',
+    body: 'El conductor no acepto tu solicitud. No se te cobro. Busca otro viaje compartido.',
+  },
+  {
+    // Push HONESTO al PASAJERO: el TTL (~5min) venció sin respuesta del conductor. Sin plata movida.
+    key: TEMPLATE_KEYS.BOOKING_EXPIRED,
+    channel: NotificationChannel.PUSH,
+    locale: LOCALE,
+    subject: 'Tu solicitud expiro',
+    body: 'El conductor no respondio a tiempo y tu solicitud expiro. No se te cobro. Busca otro viaje compartido.',
+  },
+  {
+    // RECIBO al PASAJERO: el cobro capturó y el seat-lock confirmó su asiento (COBRO_PENDIENTE → CONFIRMADO).
+    key: TEMPLATE_KEYS.BOOKING_CONFIRMED,
+    channel: NotificationChannel.PUSH,
+    locale: LOCALE,
+    subject: 'Reserva confirmada',
+    body: 'Tu asiento esta confirmado · S/{{amount}}. Revisa el detalle de tu viaje compartido.',
   },
 ];
