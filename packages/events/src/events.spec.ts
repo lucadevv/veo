@@ -475,6 +475,24 @@ describe('PUJA / negociación (ADR 010 §4)', () => {
     expect(
       EVENT_SCHEMAS['trip.reassigning'].safeParse({ ...ok, dispatchMode: 'CARPOOL' }).success,
     ).toBe(false);
+    // BE-2 + Ola 2B — transporta specialRequests + waypoints (mismo contrato que bid_posted) para que el
+    // board re-abierto NO degrade a []/0 al rearmarse solo desde el evento. Opcionales (compat N-2),
+    // enum cerrado de solicitudes, máx 3 paradas.
+    expect(
+      EVENT_SCHEMAS['trip.reassigning'].safeParse({
+        ...ok,
+        specialRequests: ['PET', 'LUGGAGE'],
+        waypoints: [{ lat: -12.05, lon: -77.03 }],
+      }).success,
+    ).toBe(true);
+    expect(
+      EVENT_SCHEMAS['trip.reassigning'].safeParse({ ...ok, specialRequests: ['SURFBOARD'] })
+        .success,
+    ).toBe(false);
+    const wp = { lat: -12.05, lon: -77.03 };
+    expect(
+      EVENT_SCHEMAS['trip.reassigning'].safeParse({ ...ok, waypoints: [wp, wp, wp, wp] }).success,
+    ).toBe(false);
   });
 
   it('pricing.mode_schedule_updated: acepta snapshot válido, rechaza mode/dayMask/minuto fuera de rango (ADR 011)', () => {
@@ -514,6 +532,52 @@ describe('PUJA / negociación (ADR 010 §4)', () => {
     // version negativa.
     expect(
       EVENT_SCHEMAS['pricing.mode_schedule_updated'].safeParse({ ...ok, version: -1 }).success,
+    ).toBe(false);
+  });
+
+  it('dispatch.radius_config_updated: acepta snapshot v1 (policyV2 null) y v2 completo; rechaza policyVersion desconocida', () => {
+    const v1: EventPayload<'dispatch.radius_config_updated'> = {
+      nearbyKRing: 3,
+      matchKRing: 4,
+      offerTimeoutMs: 20_000,
+      bidWindowSec: 60,
+      policyVersion: 'v1',
+      policyV2: null,
+      version: 1,
+      updatedAt: new Date().toISOString(),
+    };
+    expect(EVENT_SCHEMAS['dispatch.radius_config_updated'].safeParse(v1).success).toBe(true);
+    // v2 completo; expandIntervalSec es opcional (compat: parsePolicyV2 del dispatch defaultea).
+    const v2 = {
+      ...v1,
+      policyVersion: 'v2',
+      policyV2: {
+        FIXED: {
+          initialRadiusKm: 0.6,
+          incrementKm: 0.3,
+          maxRadiusKm: 1.8,
+          targetDrivers: 3,
+          offerTimeoutSec: 20,
+        },
+        PUJA: { broadcastRadiusKm: 1.2, bidWindowSec: 60 },
+      },
+    };
+    expect(EVENT_SCHEMAS['dispatch.radius_config_updated'].safeParse(v2).success).toBe(true);
+    // policyVersion fuera del flag conocido.
+    expect(
+      EVENT_SCHEMAS['dispatch.radius_config_updated'].safeParse({ ...v1, policyVersion: 'v3' })
+        .success,
+    ).toBe(false);
+    // k-ring no entero-positivo.
+    expect(
+      EVENT_SCHEMAS['dispatch.radius_config_updated'].safeParse({ ...v1, nearbyKRing: 0 }).success,
+    ).toBe(false);
+    // policyV2 estructuralmente roto (falta PUJA).
+    expect(
+      EVENT_SCHEMAS['dispatch.radius_config_updated'].safeParse({
+        ...v2,
+        policyV2: { FIXED: (v2.policyV2 as { FIXED: unknown }).FIXED },
+      }).success,
     ).toBe(false);
   });
 });

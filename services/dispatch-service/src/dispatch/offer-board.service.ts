@@ -116,6 +116,13 @@ export interface Reassigning {
   destination: LatLon;
   distanceMeters: number;
   durationSeconds: number;
+  /// BE-2 — solicitudes especiales del pasajero: el board re-abierto las conserva aunque se rearme SOLO
+  /// desde el evento (el row Trip fresco viaja en trip.reassigning). Opcional por compat N-2 (reassigning
+  /// previos sin el campo ⇒ [] si el board previo tampoco sobrevivió).
+  specialRequests?: SpecialRequest[];
+  /// Ola 2B — paradas del viaje (máx 3, row Trip FRESCO al momento del cancel). El board re-abierto
+  /// persiste SOLO el conteo (need-to-know pre-aceptación). Opcional por compat N-2.
+  waypoints?: LatLon[];
   bidCents: number;
   /// H13 — ciclo de negociación del NUEVO re-match (seq incrementado por trip al pasar a REASSIGNING).
   negotiationSeq: number;
@@ -308,12 +315,14 @@ export class OfferBoardService {
       // re-abrir = ciclo fresco, así el offer_accepted del re-match lleva un seq MAYOR y el offer_accepted
       // STALE del ciclo anterior queda bloqueado en applyAgreedFare (seq menor → where no matchea).
       negotiationSeq: reassign.negotiationSeq,
-      // BE-2 — se preservan si el board previo sobrevivió (TTL no expiró). Si se rearma SOLO desde el evento
-      // (board ya expirado), quedan []: trip.reassigning aún no las transporta (follow-up). Degradación honesta.
-      specialRequests: existing?.specialRequests ?? [],
-      // Ola 2B — mismo criterio que specialRequests: se preserva del board previo; trip.reassigning aún no
-      // transporta waypoints (follow-up) → 0 si se rearma solo desde el evento. Degradación honesta.
-      waypointCount: existing?.waypointCount ?? 0,
+      // BE-2 — del EVENTO primero (row Trip FRESCO al momento del cancel; cierra el follow-up "reassigning
+      // no las transportaba" que degradaba a [] con el board expirado); el board previo queda como compat
+      // N-2 para un reassigning viejo sin el campo. A diferencia de destination/category (inmutables entre
+      // bid y cancel), acá el evento puede ser MÁS fresco que el board.
+      specialRequests: reassign.specialRequests ?? existing?.specialRequests ?? [],
+      // Ola 2B — mismo criterio: el conteo del EVENTO (incluye una parada aceptada POST-accept que el board
+      // original no vio); board previo como compat N-2 de un evento viejo sin el campo. Antes degradaba a 0.
+      waypointCount: reassign.waypoints ? reassign.waypoints.length : (existing?.waypointCount ?? 0),
     };
     // N4 — Higiene de ventana: PURGA las ofertas de la ventana ANTERIOR antes de re-abrir. Sin esto, un
     // COUNTER viejo (a un precio que ya no aplica) o una oferta STALE/LAPSED sobreviven en el HASH y el

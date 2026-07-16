@@ -810,6 +810,42 @@ describe('AuditConsumer · trazabilidad total (representativos por categoría ·
     });
   });
 
+  it('C/ciclo · booking.rejected → actor=driverId (el conductor decidió), recurso=booking/bookingId', async () => {
+    const envelope = createEnvelope({
+      eventType: 'booking.rejected',
+      producer: 'booking-service',
+      payload: {
+        bookingId: 'bk-8',
+        publishedTripId: 'pt-8',
+        passengerId: 'pax-8',
+        driverId: 'drv-8',
+        estado: 'RECHAZADO',
+      },
+    });
+    await handlers.get('booking.rejected')!(envelope);
+    expect(mappingOf()).toEqual({ actorId: 'drv-8', resourceType: 'booking', resourceId: 'bk-8' });
+  });
+
+  it('C/ciclo · booking.expired (TTL sin respuesta, decisión automática) → actor=system, recurso=booking/bookingId', async () => {
+    const envelope = createEnvelope({
+      eventType: 'booking.expired',
+      producer: 'booking-service',
+      payload: {
+        bookingId: 'bk-9',
+        publishedTripId: 'pt-9',
+        passengerId: 'pax-9',
+        driverId: 'drv-9',
+        estado: 'EXPIRADO',
+      },
+    });
+    await handlers.get('booking.expired')!(envelope);
+    expect(mappingOf()).toEqual({
+      actorId: 'system',
+      resourceType: 'booking',
+      resourceId: 'bk-9',
+    });
+  });
+
   it('C/ciclo · booking.cancelled forma B (booking individual, con bookingId) → actor=system, recurso=booking', async () => {
     const envelope = createEnvelope({
       eventType: 'booking.cancelled',
@@ -852,6 +888,29 @@ describe('AuditConsumer · trazabilidad total (representativos por categoría ·
     });
     await handlers.get('dispatch.match_found')!(envelope);
     expect(mappingOf()).toEqual({ actorId: 'drv-5', resourceType: 'dispatch', resourceId: 't-5' });
+  });
+
+  it('C/ciclo · dispatch.radius_config_updated → actor=system, recurso=dispatch/radius_config (config snapshot)', async () => {
+    const envelope = createEnvelope({
+      eventType: 'dispatch.radius_config_updated',
+      producer: 'dispatch-service',
+      payload: {
+        nearbyKRing: 3,
+        matchKRing: 4,
+        offerTimeoutMs: 20_000,
+        bidWindowSec: 60,
+        policyVersion: 'v1',
+        policyV2: null,
+        version: 7,
+        updatedAt: new Date().toISOString(),
+      },
+    });
+    await handlers.get('dispatch.radius_config_updated')!(envelope);
+    expect(mappingOf()).toEqual({
+      actorId: 'system',
+      resourceType: 'dispatch',
+      resourceId: 'radius_config',
+    });
   });
 
   // ── D · metadato (chat SÍ se audita; el body lo descarta la proyección antes del WORM) ──

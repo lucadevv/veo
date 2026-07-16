@@ -7,6 +7,7 @@ import { createEnvelope } from '@veo/events';
 import { enqueueOutbox } from '@veo/database';
 import { PricingMode, TripStatus } from '@veo/shared-types';
 import { emitBidPosted, recordTripEvent, PRODUCER } from '../trip-events';
+import { readWaypoints } from '../trip-view.mapper';
 import type { Prisma, Trip } from '../../generated/prisma';
 import type {
   DispatchModeStrategy,
@@ -120,6 +121,13 @@ export class PujaDispatchStrategy implements DispatchModeStrategy {
           destination: { lat: trip.destLat, lon: trip.destLon },
           distanceMeters: trip.distanceMeters,
           durationSeconds: trip.durationSeconds,
+          // BE-2 — el board re-abierto conserva las solicitudes especiales aunque se rearme SOLO desde el
+          // evento (la key previa de Redis expiró por TTL): antes degradaban a [] y el conductor del
+          // re-match veía MENOS info que el original.
+          specialRequests: trip.specialRequests,
+          // Ola 2B — paradas del row Trip FRESCO (incluye una parada aceptada post-accept): el conductor
+          // del re-match ve el MISMO "+N paradas" que el original; antes degradaba a 0.
+          waypoints: readWaypoints(trip),
           bidCents,
           reason: 'driver_cancelled',
           // H13 — dispatch persiste este seq en el board re-abierto y lo estampa en offer_accepted.

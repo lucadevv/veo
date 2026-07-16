@@ -183,7 +183,7 @@ export default function OpsPage() {
             ) : null}
             {/* Overlays fieles al diseño (datos reales) */}
             {stat ? (
-              <div className="absolute left-4 top-4 rounded-[10px] bg-[#0A0B0F]/80 px-3 py-2 text-xs font-medium text-white shadow-2">
+              <div className="absolute left-4 top-4 rounded-[10px] bg-feed/80 px-3 py-2 text-xs font-medium text-white shadow-2">
                 {stat}
               </div>
             ) : null}

@@ -147,6 +147,39 @@ describe('payload-projection · PII-guard (cero PII al WORM, para TODO evento de
     expect('destination' in safe).toBe(false);
   });
 
+  it('config · dispatch.radius_config_updated mantiene los escalares del snapshot y DESCARTA policyV2 (objeto)', () => {
+    const safe = projectAuditPayload('dispatch.radius_config_updated', {
+      nearbyKRing: 3,
+      matchKRing: 4,
+      offerTimeoutMs: 20_000,
+      bidWindowSec: 60,
+      policyVersion: 'v2',
+      policyV2: {
+        FIXED: {
+          initialRadiusKm: 0.6,
+          incrementKm: 0.3,
+          maxRadiusKm: 1.8,
+          targetDrivers: 3,
+          offerTimeoutSec: 20,
+          expandIntervalSec: 8,
+        },
+        PUJA: { broadcastRadiusKm: 1.2, bidWindowSec: 60 },
+      },
+      version: 7,
+      updatedAt: '2026-07-16T00:00:00Z',
+    });
+    expect(safe).toEqual({
+      nearbyKRing: 3,
+      matchKRing: 4,
+      offerTimeoutMs: 20_000,
+      bidWindowSec: 60,
+      policyVersion: 'v2',
+      version: 7,
+      updatedAt: '2026-07-16T00:00:00Z',
+    });
+    expect('policyV2' in safe).toBe(false);
+  });
+
   it('chat · chat.message_sent mantiene metadato y DESCARTA el body', () => {
     const safe = projectAuditPayload('chat.message_sent', {
       messageId: 'msg-1',
