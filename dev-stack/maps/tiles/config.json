@@ -3,7 +3,8 @@
     "paths": { "root": "/data", "mbtiles": "", "styles": "styles", "fonts": "fonts", "sprites": "sprites" }
   },
   "styles": {
-    "veo-dark": { "style": "veo-dark/style.json" }
+    "veo-dark": { "style": "veo-dark/style.json" },
+    "veo-light": { "style": "veo-light/style.json" }
   },
   "data": { "region": { "mbtiles": "region.mbtiles" } }
 }

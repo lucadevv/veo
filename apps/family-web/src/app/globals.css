@@ -6,14 +6,10 @@
 @tailwind utilities;
 
 @layer base {
-  /* La marca VEO es un lienzo NEGRO: el esquema base es oscuro para que los controles
-   * nativos del navegador (scrollbars, form controls) rendericen en oscuro por defecto. */
+  /* Identidad Trust: lienzo CLARO (tokens.css generado por @veo/design-tokens). Los controles
+   * nativos del navegador (scrollbars, form controls) renderizan en claro. */
   :root {
-    color-scheme: dark;
-  }
-
-  .dark {
-    color-scheme: dark;
+    color-scheme: light;
   }
 
   html {
