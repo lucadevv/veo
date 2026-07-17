@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Splash Trust: lienzo claro (veo_splash_background = theme bg del JS) + wordmark VEO
-     (Clash Display Bold teal, renderizado de la .otf real — el drawable no puede usar fuentes). -->
+     (Clash Display Bold teal, renderizado de la .otf real — el drawable no puede usar fuentes).
+     CONSOLIDADO con apps/passenger (mismo drawable, mismo asset). -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:drawable="@color/veo_splash_background" />
     <item>

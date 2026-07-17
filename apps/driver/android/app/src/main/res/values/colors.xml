@@ -1,13 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- VEO · identidad Trust (canon en packages/design-tokens: brand/teal #0075A9, lienzo #F5F7FA).
-         Android no puede leer el paquete TS: estos hex ESPEJAN los tokens — si el canon cambia, cambiar acá. -->
+         Android no puede leer el paquete TS: estos hex ESPEJAN los tokens — si el canon cambia, cambiar acá.
+         CONSOLIDADO con apps/passenger (mismos nombres y valores). -->
     <color name="veo_black">#FF0A0B0F</color>
     <color name="veo_teal">#FF0075A9</color>
     <color name="veo_white">#FFF5F7FA</color>
-
-    <!-- Adaptive launcher icon background (teal de marca Trust) -->
-    <color name="ic_launcher_background">#FF0075A9</color>
 
     <!-- Splash background: MISMO lienzo claro que el splash JS (theme bg) => arranque sin flash -->
     <color name="veo_splash_background">#FFF5F7FA</color>
