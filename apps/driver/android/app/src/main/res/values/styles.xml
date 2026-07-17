@@ -6,4 +6,10 @@
         <item name="android:editTextBackground">@drawable/rn_edit_text_material</item>
     </style>
 
+    <!-- Splash Trust del launch window (CONSOLIDADO con passenger): lienzo claro + wordmark VEO teal.
+         Se aplica como theme de MainActivity; RN pinta encima al montar el primer frame. -->
+    <style name="SplashTheme" parent="AppTheme">
+        <item name="android:windowBackground">@drawable/veo_splash</item>
+    </style>
+
 </resources>
