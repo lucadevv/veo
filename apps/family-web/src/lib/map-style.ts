@@ -13,8 +13,8 @@ export function resolveMapStyle(tileUrl: string): string | StyleSpecification | 
   const trimmed = tileUrl.trim();
   if (!trimmed) return null;
 
-  // Un style.json define su propio look (idealmente un dark self-hosted): se usa tal cual,
-  // sin paint nuestro encima.
+  // Un style.json define su propio look (idealmente el veo-light self-hosted, alineado al
+  // "Daylight Trust" de las apps): se usa tal cual, sin paint nuestro encima.
   if (trimmed.endsWith('.json')) return trimmed;
 
   return {
@@ -34,25 +34,23 @@ export function resolveMapStyle(tileUrl: string): string | StyleSpecification | 
         source: 'osm-tiles',
         minzoom: 0,
         maxzoom: 19,
-        // Oscurece y desatura el OSM CLARO para alinearlo con el lienzo near-black azulado de
-        // marca y que la ruta azul #2D7FF9 + markers RESALTEN encima. NO es un invert: MapLibre
-        // raster no invierte, y un CSS invert sobre el canvas rompería la ruta/markers (se dibujan
-        // en el mismo canvas WebGL). El objetivo es un mapa gris-oscuro atenuado, con calles/labels
-        // aún legibles. Valores ajustados con criterio de diseño (estrategia Restrained: el azul
-        // es el único color protagonista; el tile no compite).
-        // - brightness-max 0.45: lleva el blanco del OSM a gris-medio-oscuro sin matar la lectura.
-        // - brightness-min 0: hunde texto/bordes oscuros del tile, amplía el rango hacia abajo.
-        // - saturation -0.7: desatura verdes/amarillos del OSM para que ningún color rivalice con el azul.
-        // - contrast -0.1: suaviza franjas duras blancas para un gris uniforme y atenuado.
-        // NOTA DE INFRA (no implementar acá): el dark IDEAL a largo plazo es servir un style.json
-        // dark self-hosted desde el tileserver (NEXT_PUBLIC_TILE_URL=.../styles/veo/style.json,
-        // ver .env.example). Este paint es la mejora del FALLBACK raster XYZ mientras ese style
-        // dark no esté configurado; cuando lo esté, la rama .json de arriba lo toma sin este paint.
+        // Atenúa el OSM crudo para el lienzo CLARO Trust: el tile queda claro (coherente con el
+        // fondo --bg #F5F7FA) pero desaturado, para que la ruta teal #0075A9 + markers sean el
+        // único color protagonista (estrategia Restrained: el tile no compite). Mismo criterio
+        // que el "Daylight Trust" de las apps RN, aplicado al fallback raster.
+        // - saturation -0.6: apaga verdes/amarillos del OSM sin dejarlo gris muerto.
+        // - contrast -0.08: suaviza el ruido de calles/manzanas para un fondo calmo.
+        // - brightness-min 0.04: levanta apenas los negros del tile (labels/bordes) hacia el
+        //   gris-azulado de la identidad; el texto sigue legible.
+        // NOTA DE INFRA (no implementar acá): el IDEAL a largo plazo es servir un style.json
+        // veo-light self-hosted desde el tileserver (NEXT_PUBLIC_TILE_URL=.../styles/veo-light/
+        // style.json, ver env/example.env). Este paint es la mejora del FALLBACK raster XYZ
+        // mientras ese style no esté configurado; cuando lo esté, la rama .json lo toma sin paint.
         paint: {
-          'raster-brightness-max': 0.45,
-          'raster-brightness-min': 0,
-          'raster-saturation': -0.7,
-          'raster-contrast': -0.1,
+          'raster-brightness-max': 1,
+          'raster-brightness-min': 0.04,
+          'raster-saturation': -0.6,
+          'raster-contrast': -0.08,
         },
       },
     ],

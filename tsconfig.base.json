@@ -38,6 +38,9 @@
 
     "baseUrl": ".",
     "paths": {
+      // dist (no src): ui-kit es composite con rootDir src — mapear a src metería el fuente
+      // ajeno en su programa (TS6059). turbo `^build` garantiza el dist antes de los dependientes.
+      "@veo/design-tokens": ["packages/design-tokens/dist"],
       "@veo/shared-types": ["packages/shared-types/src"],
       "@veo/shared-types/*": ["packages/shared-types/src/*"],
       "@veo/utils": ["packages/utils/src"],

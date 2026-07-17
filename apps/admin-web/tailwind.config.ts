@@ -11,9 +11,10 @@ const config: Config = {
   darkMode: 'class',
   theme: {
     extend: {
-      // `info` (#0097CE trust-info): el preset COMPARTIDO no lo mapea a propósito — family-web y
-      // web-hub usan ese preset en dark y no definen --info. Se declara SCOPED a admin acá (igual que
-      // display/serif/xl) para no tocar shared-config. Habilita bg-info / text-info / border-info.
+      // `info` (#0097CE trust-info): las VARS --info/--on-info ya vienen del tokens.css GENERADO,
+      // pero el preset COMPARTIDO no las mapea a utilidades (family-web/web-hub no las usan). El
+      // mapeo va SCOPED a admin acá (igual que display/serif/xl) para no tocar shared-config.
+      // Habilita bg-info / text-info / border-info.
       colors: {
         info: { DEFAULT: c('--info'), on: c('--on-info') },
         // Superficie oscura del feed de cámaras (CameraTile / placeholders de video): intrínseca

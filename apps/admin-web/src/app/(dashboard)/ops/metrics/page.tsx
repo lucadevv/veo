@@ -48,10 +48,10 @@ const MODE_LABEL: Record<string, string> = {
   ON_DEMAND: 'On-demand',
 };
 const MODE_COLOR: Record<string, string> = {
-  FIXED: '#0075A9',
-  PUJA: '#F2AF48',
-  CARPOOLING: '#00C853',
-  ON_DEMAND: '#0075A9',
+  FIXED: 'var(--brand)',
+  PUJA: 'var(--warn)',
+  CARPOOLING: 'var(--success)',
+  ON_DEMAND: 'var(--brand)',
 };
 
 /**
@@ -140,7 +140,7 @@ export default function MetricsPage() {
     ? d.byMode.map((m) => ({
         label: MODE_LABEL[m.mode] ?? m.mode,
         value: m.revenueCents,
-        color: MODE_COLOR[m.mode] ?? '#B0BEC5',
+        color: MODE_COLOR[m.mode] ?? 'var(--ink-subtle)',
       }))
     : [];
 

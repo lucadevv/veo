@@ -38,7 +38,8 @@ const VARIANTS: Record<StateVariant, VariantConfig> = {
   },
   'ended-completed': {
     icon: CheckCircle2,
-    iconClass: 'text-success',
+    // success-text (#00873A), no success (#00C853): el relleno canon no alcanza 3:1 sobre surface-2.
+    iconClass: 'text-success-text',
     title: 'El viaje terminó',
     body: 'Tu familiar llegó a su destino. Gracias por acompañarlo en el camino.',
   },
@@ -67,14 +68,14 @@ export function StateScreen({ variant, action }: { variant: StateVariant; action
         <span className="grid size-9 place-items-center rounded-md bg-brand text-brand-on">
           <Eye className="size-5" aria-hidden />
         </span>
-        <span className="text-lg font-semibold tracking-tight">VEO Family</span>
+        <span className="font-display text-lg font-semibold tracking-tight">VEO Family</span>
       </header>
 
       <div className="flex flex-1 flex-col items-center justify-center text-center">
         <span className="grid size-16 place-items-center rounded-full bg-surface-2">
           <Icon className={`size-8 ${config.iconClass}`} />
         </span>
-        <h1 className="mt-6 text-2xl font-semibold tracking-tight">{config.title}</h1>
+        <h1 className="mt-6 font-display text-2xl font-semibold tracking-tight">{config.title}</h1>
         <p className="mt-3 max-w-sm text-base leading-relaxed text-ink-muted">{config.body}</p>
         {action ? <div className="mt-7">{action}</div> : null}
       </div>

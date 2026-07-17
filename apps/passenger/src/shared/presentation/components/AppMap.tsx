@@ -7,7 +7,7 @@ import {
   MarkerView,
   ShapeSource,
 } from '@rnmapbox/maps';
-import { ELEVATION_SHADOW_COLOR,passengerMapRoute, RoutePin} from '@veo/ui-kit';
+import { ELEVATION_SHADOW_COLOR,passengerMapRoute, RoutePin, useTheme} from '@veo/ui-kit';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {StyleSheet, useWindowDimensions, View} from 'react-native';
 import Animated, {
@@ -208,12 +208,18 @@ function DriverVehicleMarkerComponent({
   vehicleType,
 }: DriverVehicleMarkerProps): React.JSX.Element {
   const {LineIcon} = offeringGlyph({vehicleType});
+  const theme = useTheme();
   return (
     <MarkerView
       coordinate={toLngLat(point)}
       anchor={{x: 0.5, y: 0.5}}
       allowOverlap>
-      <View pointerEvents="none" style={styles.assignedBadge}>
+      <View
+        pointerEvents="none"
+        style={[
+          styles.assignedBadge,
+          {backgroundColor: theme.colors.surface, borderColor: theme.colors.border},
+        ]}>
         <LineIcon
           color={passengerMapRoute.routeColor}
           size={DRIVER_VEHICLE_SIZE - 14}
@@ -701,16 +707,15 @@ function AppMapComponent({
  * re-ejecutaba el componente y, junto con un centro inestable, mantenía al contexto GL en churn
  * → mapa negro. Con memo + centro estable, el GL se asienta y el mapa renderiza.
  */
-// Badge circular del conductor ASIGNADO (espejo del puck del driver): fondo blanco + borde sutil
-// para que el ícono de línea del vehículo (moto/auto) sea inconfundible sobre cualquier mapa.
+// Badge circular del conductor ASIGNADO (espejo del puck del driver): superficie clara + borde
+// sutil para que el ícono de línea del vehículo (moto/auto) sea inconfundible sobre cualquier
+// mapa. Los colores (surface/border) salen del theme en el componente — acá solo la geometría.
 const styles = StyleSheet.create({
   assignedBadge: {
     width: DRIVER_VEHICLE_SIZE,
     height: DRIVER_VEHICLE_SIZE,
     borderRadius: DRIVER_VEHICLE_SIZE / 2,
-    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: '#D5DCE4',
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: ELEVATION_SHADOW_COLOR,

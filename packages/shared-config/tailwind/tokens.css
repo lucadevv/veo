@@ -1,101 +1,83 @@
 /**
- * VEO · Design tokens (OKLCH). Importar UNA vez en el globals.css de cada app web
- * antes de las capas de Tailwind:  @import "@veo/shared-config/tailwind/tokens.css";
+ * VEO · Design tokens · GENERADO por `@veo/design-tokens` — NO editar a mano.
+ * Regenerar con:  pnpm --filter @veo/design-tokens generate:css
  *
- * Fuente ÚNICA de marca: `packages/ui-kit/src/tokens/themes.ts` (hex sRGB del driverTheme,
- * el sistema canónico). Este archivo DERIVA esos valores a OKLCH para la web. Marca = lienzo
- * near-black AZULADO (#0A0B0F) + azul VEO (#2D7FF9) de acento DISCIPLINADO. Sobre el azul el
- * texto es BLANCO (onAccent #FFFFFF → 3.81:1, pasa AA-large para texto semibold/grande).
- * Estrategia de color: Restrained (neutros tintados hacia azul/frío + 1 acento azul ≤10%).
- * Contraste verificado AA sobre bg azul-oscuro (ink 18.33:1, inkMuted 12.05:1).
+ * Fuente ÚNICA de marca: `packages/design-tokens/src/index.ts` (canon Trust LIGHT, el mismo
+ * que consumen passenger y driver vía @veo/ui-kit). Importar UNA vez en el globals.css de cada
+ * app web antes de las capas de Tailwind:  @import "@veo/shared-config/tailwind/tokens.css";
+ *
+ * El sistema es LIGHT-first (Trust: lienzo claro + teal #0075A9 disciplinado); no hay bloque
+ * .dark — un `html.dark` hereda estos mismos tokens, la clase no parte la marca. Los valores
+ * van en hex/rgba sRGB: el preset Tailwind los normaliza con `oklch(from var(--x) l c h / α)`
+ * (relative color syntax), así que el formato de origen es indistinto.
+ *
+ * NOTA: `surfaceElevated` del canon no se emite (en light es === surface #FFFFFF);
+ * la 2ª superficie web (--surface-2) es la recesada `surfaceMuted`. `safe`/`onSafe`
+ * tampoco (alias RN de success).
  */
 
 :root {
-  /* Superficies — lienzo near-black AZULADO de marca (driverTheme: #0A0B0F / #14161C / #1E212A) */
-  --bg: oklch(0.1504 0.0088 274.27);
-  --surface: oklch(0.2008 0.0124 270.73);
-  --surface-2: oklch(0.2487 0.0177 270.61);
+  /* Superficies — lienzo claro Trust (canvas gris, tarjetas blancas, recesado sutil) */
+  --bg: #F5F7FA;
+  --surface: #FFFFFF;
+  --surface-2: #EEF1F5;
 
-  /* Tinta / texto (driverTheme: #F5F7FA / #C4CBD6 / #8A929E) */
-  --ink: oklch(0.9755 0.0045 258.32);
-  --ink-muted: oklch(0.84 0.0171 259.42);
-  --ink-subtle: oklch(0.6573 0.0201 258.37);
+  /* Tinta / texto */
+  --ink: #1A2332;
+  --ink-muted: #647386;
+  --ink-subtle: #B0BEC5;
 
-  /* Bordes (driverTheme: #1C1F27 / #2B2F3A) */
-  --border: oklch(0.2398 0.016 269);
-  --border-strong: oklch(0.3059 0.0206 269.44);
+  /* Bordes y divisores */
+  --border: #DDE1E7;
+  --border-strong: #C5CDD6;
+  --divider: #E8ECF1;
 
-  /* Marca + acento = azul VEO #2D7FF9 · texto encima = BLANCO */
-  --brand: oklch(0.6149 0.1987 258.84);
-  --brand-hover: oklch(0.5497 0.1943 259.65);
-  --on-brand: oklch(1 0 0);
-  --accent: oklch(0.6149 0.1987 258.84);
-  --accent-hover: oklch(0.5497 0.1943 259.65);
-  --on-accent: oklch(1 0 0);
+  /* Marca + acento = teal de confianza · texto encima = BLANCO */
+  --brand: #0075A9;
+  --brand-hover: #005A82;
+  --on-brand: #FFFFFF;
+  --brand-dim: rgba(0,117,169,0.08);
+  --brand-deep: #00313C;
+  --accent: #0075A9;
+  --accent-hover: #4A9BC7;
+  --on-accent: #FFFFFF;
+  --accent-strong: #009624;
 
-  /* Estado (driverTheme/ui-kit: success #17C08A jade · warn #F2AF48 · danger #FF4D6A). El success
-   * ERA #34D399 (mint) por un comentario stale que creía que el conductor usaba mint; el ui-kit
-   * elige jade a propósito (NO el mint "de app hecha por AI") → un solo verde de marca en RN + admin. */
-  --success: oklch(0.717 0.149 163.9);
-  --on-success: oklch(0 0 0);
-  --warn: oklch(0.80 0.13 75);
-  --on-warn: oklch(0 0 0);
-  --danger: oklch(0.6779 0.213 15.77);
-  --danger-hover: oklch(0.6158 0.2067 17.06);
-  --on-danger: oklch(0 0 0);
+  /* Estado (canon trust-*: success #00C853 · warn #FFA000 · danger #D11216 · info #0097CE) */
+  --success: #00C853;
+  --on-success: #04160D;
+  --success-text: #00873A;
+  --success-dim: rgba(0,200,83,0.10);
+  --warn: #FFA000;
+  --on-warn: #3A2600;
+  --warn-text: #B26A00;
+  --warn-dim: rgba(255,160,0,0.10);
+  --danger: #D11216;
+  --danger-hover: #B10E12;
+  --on-danger: #FFFFFF;
+  --danger-dim: rgba(209,18,22,0.08);
+  --info: #0097CE;
+  --on-info: #FFFFFF;
+  --info-dim: rgba(0,151,206,0.10);
 
-  /* Foco = azul VEO */
-  --focus: oklch(0.6149 0.1987 258.84);
+  /* Foco accesible + scrim + skeleton */
+  --focus: #0075A9;
+  --overlay: rgba(26,35,50,0.45);
+  --skeleton: #E8ECF1;
+  --skeleton-highlight: #F5F7FA;
 
-  /* Radios y sombras (sombras negras tenues, modo noche; sin navy translúcido) */
+  /* Radios y sombras (light: sombra SUAVE teñida de la tinta azul-gris, nunca negra pura) */
   --radius-sm: 0.5rem;
   --radius-md: 0.75rem;
   --radius-lg: 1rem;
-  --shadow-1: 0 1px 2px oklch(0 0 0 / 0.5), 0 1px 1px oklch(0 0 0 / 0.4);
-  --shadow-2: 0 4px 8px oklch(0 0 0 / 0.55);
-  --shadow-3: 0 8px 24px oklch(0 0 0 / 0.6);
+  --shadow-1: 0 1px 2px rgba(26,35,50, 0.06), 0 1px 1px rgba(26,35,50, 0.04);
+  --shadow-2: 0 4px 12px -2px rgba(26,35,50, 0.08);
+  --shadow-3: 0 18px 40px -12px rgba(26,35,50, 0.12);
 
   /* Curvas de easing (emil-design-eng) */
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
   --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
-}
-
-/* La marca VEO ES oscura: el lienzo base ya es near-black azulado. La clase .dark se mantiene
- * como alias de coherencia (admin puede alternarla) PERO no reintroduce navy: hereda el mismo
- * sistema azul del :root para que activar/desactivar el toggle no parta la marca. */
-.dark {
-  --bg: oklch(0.1504 0.0088 274.27);
-  --surface: oklch(0.2008 0.0124 270.73);
-  --surface-2: oklch(0.2487 0.0177 270.61);
-
-  --ink: oklch(0.9755 0.0045 258.32);
-  --ink-muted: oklch(0.84 0.0171 259.42);
-  --ink-subtle: oklch(0.6573 0.0201 258.37);
-
-  --border: oklch(0.2398 0.016 269);
-  --border-strong: oklch(0.3059 0.0206 269.44);
-
-  --brand: oklch(0.6149 0.1987 258.84);
-  --brand-hover: oklch(0.5497 0.1943 259.65);
-  --on-brand: oklch(1 0 0);
-  --accent: oklch(0.6149 0.1987 258.84);
-  --accent-hover: oklch(0.5497 0.1943 259.65);
-  --on-accent: oklch(1 0 0);
-
-  --success: oklch(0.717 0.149 163.9);
-  --on-success: oklch(0 0 0);
-  --warn: oklch(0.80 0.13 75);
-  --on-warn: oklch(0 0 0);
-  --danger: oklch(0.6779 0.213 15.77);
-  --danger-hover: oklch(0.6158 0.2067 17.06);
-  --on-danger: oklch(0 0 0);
-
-  --focus: oklch(0.6149 0.1987 258.84);
-
-  --shadow-1: 0 1px 2px oklch(0 0 0 / 0.5), 0 1px 1px oklch(0 0 0 / 0.4);
-  --shadow-2: 0 4px 8px oklch(0 0 0 / 0.55);
-  --shadow-3: 0 8px 24px oklch(0 0 0 / 0.6);
 }
 
 @media (prefers-reduced-motion: reduce) {

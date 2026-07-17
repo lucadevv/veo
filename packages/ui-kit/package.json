@@ -27,6 +27,9 @@
     "test:watch": "vitest",
     "clean": "rimraf dist .turbo *.tsbuildinfo"
   },
+  "dependencies": {
+    "@veo/design-tokens": "workspace:*"
+  },
   "peerDependencies": {
     "react": "19.2.3",
     "react-native": "0.85.3",
