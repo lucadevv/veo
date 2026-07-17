@@ -10,14 +10,6 @@ import Animated, {
 import { useTheme } from '../theme/ThemeProvider';
 import { useReducedMotion } from '../theme/useReducedMotion';
 
-/**
- * Verde JADE del sello, FIJO cross-app (excepción documentada): el token `success` diverge por app
- * (passenger jade #17C08A, driver #00C853) → usar `theme.colors.success` rompería la SIMETRÍA del momento
- * de éxito. El jade es el de la referencia (TripComplete del conductor, que ya lo hardcodeaba). El check va
- * en `onSuccess` (#04160D en los 3 themes → simétrico) vía el theme.
- */
-const SUCCESS_JADE = '#17C08A';
-
 export interface SuccessCheckProps {
   /** Diámetro del círculo. Default 72 (hero). Usá ~40 para inline. */
   size?: number;
@@ -68,7 +60,9 @@ export function SuccessCheck({ size = 72, animate = true }: SuccessCheckProps): 
           width: size,
           height: size,
           borderRadius: size / 2,
-          backgroundColor: SUCCESS_JADE,
+          // `success` es simétrico cross-app desde el canon @veo/design-tokens (TASK-016):
+          // murió la excepción documentada que hardcodeaba el jade #17C08A acá.
+          backgroundColor: theme.colors.success,
         },
         animatedStyle,
       ]}

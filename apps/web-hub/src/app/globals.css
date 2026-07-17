@@ -1,33 +1,26 @@
+/* Sistema de diseño compartido VEO (canon Trust light de @veo/design-tokens).
+ * Debe ir ANTES de las capas de Tailwind. El hub NO define hex propios: los tokens
+ * semánticos (--bg/--surface/--ink/--brand/…) vienen del sistema compartido (TASK-019
+ * enterró el sistema propio dark #0e1014 + azul viejo #2d7ff9). */
+@import '@veo/shared-config/tailwind/tokens.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/*
- * Tokens del hub, única fuente de verdad. VEO es MONOMARCA: una sola marca azul
- * (#2D7FF9 → token `--brand`), texto blanco, lienzo oscuro azulado. Tailwind los
- * referencia vía var() en tailwind.config.ts, y los estilos inline dirigidos por
- * datos (el acento de marca) también — un solo lugar para el color.
- */
-:root {
-  --bg: #0e1014;
-  --surface: #15181e;
-  --surface-2: #1c2027;
-  --ink: #f4f6f8;
-  --ink-muted: #a6adba;
-  --ink-subtle: #6b7280;
-  --border: #262b33;
-  --border-strong: #353b45;
-  --brand: #2d7ff9;
-  color-scheme: dark;
-}
-
 @layer base {
+  html {
+    /* Trust = lienzo CLARO. */
+    color-scheme: light;
+  }
   body {
-    /* Halo de marca: azul arriba-derecha + un eco azul más tenue abajo-izquierda. */
+    /* Halo de marca sobre el lienzo claro: teal arriba-derecha + un eco más tenue
+     * abajo-izquierda (misma composición que tenía el hub en dark, recalibrada a la
+     * paleta Trust: rgba de --brand #0075A9 en opacidades bajas para no ensuciar). */
     background:
-      radial-gradient(80% 50% at 80% -5%, rgba(45, 127, 249, 0.1) 0%, transparent 55%),
-      radial-gradient(70% 50% at 10% 105%, rgba(45, 127, 249, 0.06) 0%, transparent 55%),
-      linear-gradient(180deg, #0d1014 0%, #0b0d11 100%);
+      radial-gradient(80% 50% at 80% -5%, rgba(0, 117, 169, 0.08) 0%, transparent 55%),
+      radial-gradient(70% 50% at 10% 105%, rgba(0, 117, 169, 0.05) 0%, transparent 55%),
+      var(--bg);
     background-attachment: fixed;
     min-height: 100vh;
   }
