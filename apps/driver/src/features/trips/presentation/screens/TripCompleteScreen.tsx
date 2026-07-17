@@ -138,8 +138,7 @@ export const TripCompleteScreen = ({ navigation, route }: Props): React.JSX.Elem
         {/* EFECTIVO · confirmación de cobro en mano (POST-completado). Debajo del check de éxito, con la
             estética de la pantalla (Card + Button del ui-kit). Al confirmar, la card se reemplaza por una
             nota sutil. Solo en viajes CASH. Los acentos verdes de la card usan el token `success` del
-            driver (#00C853), el mismo verde que su botón `safe` — el jade queda SOLO en el SuccessCheck
-            canónico del ui-kit (simetría cross-app del momento celebratorio). */}
+            driver, el mismo verde que su botón `safe` (un solo verde por superficie, cero hex sueltos). */}
         {isCash ? (
           <View
             style={[
