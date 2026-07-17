@@ -23,10 +23,9 @@ import { cn } from '@/lib/cn';
  *
  * Tonos: reusa el sistema del admin (`badge.tsx` / `states.tsx`) — tint `bg-{tono}/10`, borde
  * `border-{tono}/25`, ícono `text-{tono}`. `info` = cyan (--info, scoped en tailwind.config).
- * Fidelidad honesta: el board pinta título+cuerpo con verdes/ámbares OSCUROS bespoke (#0A5B31,
- * #7A4A00) que NO existen como token — usar el token crudo (p. ej. text-warn #FFA000 sobre warn/10)
- * no pasaría contraste AA. Por eso el texto va NEUTRO (text-ink / text-ink-muted), igual que Toast y
- * ErrorState; la identidad del tono la dan el ícono + el tint + el borde.
+ * El texto va NEUTRO (text-ink / text-ink-muted), igual que Toast y ErrorState: la identidad del
+ * tono la dan el ícono + el tint + el borde. Si algún día se quiere texto tonal, el canon de
+ * @veo/design-tokens ya expone --success-text/--warn-text (AA sobre tint claro) — no inventar hex.
  */
 
 type AlertTone = 'info' | 'success' | 'warn' | 'danger';
