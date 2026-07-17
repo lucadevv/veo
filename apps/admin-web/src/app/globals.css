@@ -4,58 +4,16 @@
 @import "maplibre-gl/dist/maplibre-gl.css";
 
 /* ─────────────────────────────────────────────────────────────────────────────
- * Tema "Trust" (LIGHT) — override SCOPED a admin-web sobre los tokens compartidos.
- * No toca packages/shared-config (family-web/web-hub siguen dark). Redefine los VALORES
- * de los tokens semánticos a la paleta trust del veo.pen; toda utilidad existente
- * (bg-bg, bg-surface, text-ink, bg-accent…) hereda el light sin reescribir componentes.
- * Paleta (hex del diseño): surface #F5F7FA · elevated #FFFFFF · ink #1A2332 ·
- * ink-secondary #6B7A8F · ink-hint #B0BEC5 · border #DDE1E7 · primary #0075A9.
+ * Tokens Trust: vienen ENTEROS del tokens.css GENERADO por @veo/design-tokens
+ * (el @import de arriba) — acá NO se redefine ningún valor de marca. Este bloque
+ * conserva SOLO las extensiones SCOPED a admin-web que el paquete no emite.
  * ──────────────────────────────────────────────────────────────────────────── */
 :root {
-  /* Superficies — página gris claro, tarjetas blancas */
-  --bg: #F5F7FA;
-  --surface: #FFFFFF;
-  --surface-2: #EDF1F5;
-
-  /* Tinta / texto */
-  --ink: #1A2332;
-  --ink-muted: #6B7A8F;
-  --ink-subtle: #B0BEC5;
-
-  /* Bordes / divisores */
-  --border: #DDE1E7;
-  --border-strong: #C5CDD6;
-  --divider: #E8ECF1;
-
-  /* Marca = azul trust #0075A9 (trust-primary) · texto encima = BLANCO */
-  --brand: #0075A9;
-  --brand-hover: #005A82;
-  --on-brand: #FFFFFF;
-  /* Acento del ADMIN = rol PRIMARIO/marca (azul, == brand). En la Identidad Visual `trust-accent` == `trust-success`
-   * (los dos verde #00C853): el rol VERDE del sistema es `success`, no un acento aparte. El admin NUNCA usó un
-   * acento verde distinto — su `accent` siempre fue el azul de marca (logo, toggles, chrome, selección primaria).
-   * Por eso accent = brand acá; lo VERDE del admin sale de `--success`. Jerarquía: primario→brand, verde→success. */
-  --accent: #0075A9;
-  --accent-hover: #005A82;
-  --on-accent: #FFFFFF;
-
-  /* Estado — derivado de los tokens canónicos trust-* del veo.pen (Identidad Visual).
-   * success #00C853 (trust-success) · warn #FFA000 (trust-warning) · danger #D11216 (trust-error)
-   * · info #0097CE (trust-info). Supersede el legacy jade #17C08A / ámbar #F2AF48 / rosa #FF4D6A. */
-  --success: #00C853;
-  --on-success: #FFFFFF;
-  --warn: #FFA000;
-  --on-warn: #1A2332;
-  --danger: #D11216;
-  --danger-hover: #A50E12;
-  --on-danger: #FFFFFF;
-  --info: #0097CE;
-  --on-info: #FFFFFF;
-
-  --focus: #0075A9;
-
-  /* Azul profundo del gradiente de marca (columna del login) — trust-primary-dark */
-  --brand-deep: #00313C;
+  /* Hover del CTA primario: en el admin `accent` cumple rol de MARCA (accent == brand — el admin
+   * nunca usó un acento verde aparte; lo VERDE sale de `--success`) y su hover OSCURECE, como
+   * brand-hover. El canon emite --accent-hover #4A9BC7 (ACLARA, pensado para acento sobre fondos
+   * oscuros): sobre el CTA teal con texto blanco del admin rompería el contraste. Alias, no hex. */
+  --accent-hover: var(--brand-hover);
 
   /* Feed de cámaras (T/CameraTile y placeholders de video): superficie oscura INTRÍNSECA al
    * diseño del feed — NO es un surface temático, igual en claro y en oscuro. `glow` es el tinte
@@ -63,18 +21,10 @@
   --feed: #0A0B0F;
   --feed-glow: #20304A;
 
-  /* Radios: escala del veo.pen (sm8/md12/lg16/xl20/2xl28) + control 14 (botones) */
-  --radius-sm: 0.5rem;
-  --radius-md: 0.75rem;
-  --radius-lg: 1rem;
+  /* Radios del veo.pen que el paquete no emite: xl (cards) · 2xl (cards grandes) · control (botones). */
   --radius-xl: 1.25rem;
   --radius-2xl: 1.75rem;
   --radius-control: 0.875rem;
-
-  /* Sombras recalibradas para light (tinte slate, no negro puro) */
-  --shadow-1: 0 1px 2px rgba(15, 23, 42, 0.06), 0 1px 1px rgba(15, 23, 42, 0.04);
-  --shadow-2: 0 4px 12px -2px rgba(15, 23, 42, 0.08);
-  --shadow-3: 0 18px 40px -12px rgba(15, 23, 42, 0.12);
 }
 
 @tailwind base;
