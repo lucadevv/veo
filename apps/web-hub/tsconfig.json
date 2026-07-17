@@ -10,7 +10,10 @@
     "lib": ["DOM", "DOM.Iterable", "ES2022"],
     "plugins": [{ "name": "next" }],
     "baseUrl": ".",
-    "paths": { "@/*": ["./src/*"] }
+    "paths": {
+      "@/*": ["./src/*"],
+      "@veo/design-tokens": ["../../packages/design-tokens/dist"]
+    }
   },
   "include": ["next-env.d.ts", "src/**/*.ts", "src/**/*.tsx", ".next/types/**/*.ts"],
   "exclude": ["node_modules"]

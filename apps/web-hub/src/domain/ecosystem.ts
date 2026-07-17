@@ -6,8 +6,8 @@
  */
 
 /**
- * Acento de marca. VEO es MONOMARCA: una sola marca azul (#2D7FF9) en toda la
- * landing — no hay un color por app. La diferenciación entre experiencias es
+ * Acento de marca. VEO es MONOMARCA: un solo teal de confianza (--brand del canon
+ * @veo/design-tokens) en toda la landing — no hay un color por app. La diferenciación es
  * NO cromática (ícono, nombre, etiqueta y el tratamiento `solid`/fantasma).
  * El color real se resuelve en `theme/accents.ts`.
  */
@@ -26,7 +26,7 @@ export interface AppLink {
 export interface EcosystemApp {
   readonly key: string;
   readonly name: string;
-  /** Etiqueta descriptiva del tema, p. ej. "Midnight Motion · lima/negro". */
+  /** Etiqueta descriptiva de la plataforma, p. ej. "App nativa · iOS + Android". */
   readonly theme: string;
   readonly accent: AccentName;
   /** Si el ícono y el CTA primario van rellenos con el acento (true) o fantasma (false). */
