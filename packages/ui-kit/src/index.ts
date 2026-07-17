@@ -1,8 +1,9 @@
 /**
  * @veo/ui-kit · Sistema de diseño móvil VEO
  *
- * Tokens + dos temas (passenger cálido/claro · driver noche) + ThemeProvider/useTheme +
- * componentes React Native accesibles y tematizados. Consumido por passenger y driver apps.
+ * Tokens (color desde el canon @veo/design-tokens; passenger ≡ driver en Trust light) +
+ * ThemeProvider/useTheme + componentes React Native accesibles y tematizados.
+ * Consumido por passenger y driver apps.
  * Documentación: docs/DESIGN-MOBILE.md
  */
 
