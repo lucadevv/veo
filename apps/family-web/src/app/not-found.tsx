@@ -8,7 +8,9 @@ export default function NotFound() {
       <span className="grid size-12 place-items-center rounded-md bg-brand text-brand-on">
         <Eye className="size-6" aria-hidden />
       </span>
-      <h1 className="mt-6 text-2xl font-semibold tracking-tight">No encontramos esta página</h1>
+      <h1 className="mt-6 font-display text-2xl font-semibold tracking-tight">
+        No encontramos esta página
+      </h1>
       <p className="mt-3 max-w-sm text-base leading-relaxed text-ink-muted">
         Para ver un viaje necesitas el link que te compartió tu familiar. Si lo tienes, ábrelo de
         nuevo.

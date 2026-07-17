@@ -16,7 +16,7 @@ export function LiveIndicator({ connected, className }: LiveIndicatorProps) {
       className={cn(
         'inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium tabular',
         connected
-          ? 'border-success/30 bg-success/10 text-success'
+          ? 'border-success/30 bg-success/10 text-success-text'
           : 'border-border bg-surface-2 text-ink-muted',
         className,
       )}

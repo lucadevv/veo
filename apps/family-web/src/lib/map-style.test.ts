@@ -33,20 +33,22 @@ describe('resolveMapStyle', () => {
     expect(style.layers[0]).toMatchObject({ id: 'osm-tiles', type: 'raster' });
   });
 
-  it('oscurece y desatura el raster XYZ vía paint para coherencia con el lienzo negro', () => {
+  it('atenúa el raster XYZ vía paint para el lienzo claro Trust (claro y desaturado)', () => {
     const style = asStyleObject(resolveMapStyle('https://tiles.veo.pe/{z}/{x}/{y}.png'));
     const [layer] = style.layers;
-    // El paint del raster es lo que oscurece el OSM claro y hace contrastar la ruta cyan encima.
+    // El paint del raster desatura el OSM crudo para que la ruta teal de marca resalte encima.
     // Narrowing por el discriminante `type` para tipar el paint como raster sin usar `any`.
     if (layer?.type !== 'raster') {
       throw new Error('La primera capa debe ser de tipo raster');
     }
     const { paint } = layer;
     expect(paint).toBeDefined();
-    // Tile atenuado (no negro puro): max < 1 baja el blanco a gris oscuro.
-    expect(paint?.['raster-brightness-max']).toBeLessThan(1);
-    expect(paint?.['raster-brightness-min']).toBe(0);
-    // Desaturado: el OSM colorido no compite con el cyan de marca.
+    // Tile CLARO (identidad Trust): el blanco del OSM se conserva, no se oscurece.
+    expect(paint?.['raster-brightness-max']).toBe(1);
+    // Negros del tile apenas levantados hacia el gris de la identidad (labels aún legibles).
+    expect(paint?.['raster-brightness-min']).toBeGreaterThan(0);
+    expect(paint?.['raster-brightness-min']).toBeLessThan(0.15);
+    // Desaturado: el OSM colorido no compite con el teal de marca.
     expect(paint?.['raster-saturation']).toBeLessThan(0);
     expect(paint?.['raster-contrast']).toBeLessThanOrEqual(0);
   });

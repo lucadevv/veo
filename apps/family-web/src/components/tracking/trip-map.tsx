@@ -40,15 +40,15 @@ function createMarkerElement(
   el.setAttribute('role', 'img');
   el.setAttribute('aria-label', label);
   el.title = label;
-  // Borde CLARO (border-ink) como halo: sobre el tile oscurecido un borde oscuro se fundiría
-  // con el fondo; el aro claro separa el marker del mapa y le da peso. Tokens, no hex.
+  // Aro BLANCO (border-surface) + sombra como halo: el mismo tratamiento del puck en las apps RN
+  // sobre el mapa claro Trust — el aro separa el marker del tile y le da peso. Tokens, no hex.
   if (kind === 'driver') {
     el.className = 'relative grid place-items-center';
     el.innerHTML =
       '<span class="absolute inline-flex size-7 animate-ping rounded-full bg-accent/40"></span>' +
-      '<span class="relative inline-flex size-4 rounded-full border-2 border-ink bg-accent shadow-2"></span>';
+      '<span class="relative inline-flex size-4 rounded-full border-2 border-surface bg-accent shadow-2"></span>';
   } else if (kind === 'origin') {
-    el.className = 'inline-flex size-3.5 rounded-full border-2 border-ink bg-brand shadow-1';
+    el.className = 'inline-flex size-3.5 rounded-full border-2 border-surface bg-brand shadow-1';
   } else {
     el.className = 'inline-flex size-4 rounded-full border-[3px] border-brand bg-surface shadow-1';
   }
@@ -89,7 +89,9 @@ export function TripMap({ driverLocation, origin, destination, routePolyline }: 
         attributionControl: { compact: true },
         cooperativeGestures: false,
       });
-      map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
+      // bottom-right: arriba a la derecha vive el LiveBadge "En vivo" (live-tracking.tsx) y el
+      // control lo pisaba/recortaba sobre el lienzo claro.
+      map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
       mapRef.current = map;
 
       map.on('load', () => {
@@ -155,10 +157,9 @@ export function TripMap({ driverLocation, origin, destination, routePolyline }: 
     upsertMarker('driver', driver, 'driver', 'Ubicación del conductor');
 
     // MapLibre pinta en WebGL y no puede leer variables CSS: resolvemos el token --accent
-    // computado (respeta claro/oscuro) en vez de hardcodear un color.
+    // computado en vez de hardcodear un color. Fallback = teal de marca Trust (#0075A9).
     const accentColor =
-      getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() ||
-      'oklch(0.823 0.135 207)';
+      getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#0075A9';
 
     const routeCoords = poly ? decodePolyline(poly) : [];
     const existingSource = map.getSource<GeoJSONSource>(ROUTE_SOURCE);
@@ -227,8 +228,8 @@ export function TripMap({ driverLocation, origin, destination, routePolyline }: 
     );
   }
 
-  // bg-surface oscuro detrás del canvas: evita el flash blanco de MapLibre mientras inicializa
-  // y cargan los tiles, manteniendo coherencia con el lienzo negro de marca.
+  // bg-surface detrás del canvas: evita el flash crudo de MapLibre mientras inicializa y cargan
+  // los tiles, manteniendo coherencia con el lienzo claro Trust.
   return (
     <div
       ref={containerRef}

@@ -15,11 +15,11 @@ export default function HomePage() {
         <span className="grid size-9 place-items-center rounded-md bg-brand text-brand-on">
           <Eye className="size-5" aria-hidden />
         </span>
-        <span className="text-lg font-semibold tracking-tight">VEO Family</span>
+        <span className="font-display text-lg font-semibold tracking-tight">VEO Family</span>
       </header>
 
       <section className="mt-16 sm:mt-24">
-        <h1 className="text-3xl font-semibold leading-tight tracking-tight sm:text-4xl">
+        <h1 className="font-display text-3xl font-semibold leading-tight tracking-tight sm:text-4xl">
           Acompaña el viaje de quien quieres, en vivo.
         </h1>
         <p className="mt-5 max-w-prose text-lg leading-relaxed text-ink-muted">
