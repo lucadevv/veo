@@ -38,11 +38,12 @@ export const NavPuck = ({ size = 38, vehicleType = null }: NavPuckProps): React.
       <Svg width={size} height={size} viewBox="0 0 38 38">
         {/* Halo de presencia (mismo glow que la ruta). */}
         <Circle cx={19} cy={19} r={18} fill={driverMapRoute.routeGlowColor} />
-        {/* Flecha tipo cometa apuntando arriba: tip arriba, alas abajo, muesca central. */}
+        {/* Flecha tipo cometa apuntando arriba: tip arriba, alas abajo, muesca central. El contorno
+            oscuro que la despega del lienzo usa `brandDeep` (teal profundo de la marca). */}
         <Path
           d="M19 6 L30 30 L19 24 L8 30 Z"
           fill={driverMapRoute.routeColor}
-          stroke="#04131A"
+          stroke={theme.colors.brandDeep}
           strokeWidth={1.6}
           strokeLinejoin="round"
         />

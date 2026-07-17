@@ -19,15 +19,6 @@ import { Appear } from '../components/motion';
 type Props = NativeStackScreenProps<RootStackParamList, 'TripComplete'>;
 
 /**
- * Verde del CHECK de "viaje completado" — jade `#17C08A`, UNIFICADO con el check del pasajero
- * (`SuccessCheck` del cierre, `success` del tema passenger) por pedido del dueño: el momento celebratorio
- * de éxito se ve IGUAL en ambas apps. Excepción DOCUMENTADA al token `success` del driver light (#00C853,
- * board-exact): acá prima la consistencia cross-app del check sobre la fidelidad al board del conductor.
- */
-const SUCCESS_CHECK_GREEN = '#17C08A';
-
-
-/**
  * Cierre del viaje del conductor (frame C/TripComplete): resumen de ganancia (tarifa − comisión = neto)
  * + calificación al pasajero (1-5 + comentario opcional). "Listo" envía la calificación (si eligió
  * estrellas) y vuelve al dashboard; sin estrellas, el rating es opcional y "Listo" cierra igual.
@@ -146,7 +137,8 @@ export const TripCompleteScreen = ({ navigation, route }: Props): React.JSX.Elem
 
         {/* EFECTIVO · confirmación de cobro en mano (POST-completado). Debajo del check de éxito, con la
             estética de la pantalla (Card + Button del ui-kit). Al confirmar, la card se reemplaza por una
-            nota sutil. Solo en viajes CASH. */}
+            nota sutil. Solo en viajes CASH. Los acentos verdes de la card usan el token `success` del
+            driver, el mismo verde que su botón `safe` (un solo verde por superficie, cero hex sueltos). */}
         {isCash ? (
           <View
             style={[
@@ -154,7 +146,7 @@ export const TripCompleteScreen = ({ navigation, route }: Props): React.JSX.Elem
               styles.cashCard,
               {
                 backgroundColor: theme.colors.surface,
-                borderColor: cashSettled ? theme.colors.border : SUCCESS_CHECK_GREEN,
+                borderColor: cashSettled ? theme.colors.border : theme.colors.success,
                 borderRadius: theme.radii.lg,
                 padding: theme.spacing.lg,
                 gap: theme.spacing.md,
@@ -162,7 +154,7 @@ export const TripCompleteScreen = ({ navigation, route }: Props): React.JSX.Elem
             ]}
           >
             {cashSettled ? (
-              <Text variant="bodyStrong" align="center" style={{ color: SUCCESS_CHECK_GREEN }}>
+              <Text variant="bodyStrong" align="center" style={{ color: theme.colors.success }}>
                 {cashCollected
                   ? t('trips.complete.cashRegistered')
                   : t('trips.complete.cashReported')}
@@ -310,8 +302,8 @@ const styles = StyleSheet.create({
   hero: { gap: 16, alignItems: 'center', paddingTop: 24, paddingBottom: 8 },
   earn: { gap: 2, alignItems: 'center' },
   card: { alignSelf: 'stretch', borderWidth: StyleSheet.hairlineWidth },
-  // La card de cobro lleva su propio borde (jade sin confirmar → gris tras confirmar): borde algo más
-  // marcado que el hairline del resto para destacar la acción pendiente.
+  // La card de cobro lleva su propio borde (verde `success` sin confirmar → gris tras confirmar): borde
+  // algo más marcado que el hairline del resto para destacar la acción pendiente.
   cashCard: { borderWidth: 1 },
   cashActions: { gap: 10 },
   rateCard: { alignItems: 'center' },

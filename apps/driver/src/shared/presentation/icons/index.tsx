@@ -1,5 +1,6 @@
 import React from 'react';
 import Svg, { Circle, Path, Polyline, Rect } from 'react-native-svg';
+import { useTheme } from '@veo/ui-kit';
 
 /**
  * Set de íconos propios (line-icons cian "Midnight Motion") dibujados con react-native-svg.
@@ -12,21 +13,23 @@ export interface IconProps {
   strokeWidth?: number;
 }
 
-// Fallback de color para cuando el consumidor no pasa `color`. Ink oscuro del Theme de Confianza
-// (light) — antes era gris casi-blanco #EFF2F6 (modo noche). Casi todos los consumidores pasan
-// `color` desde el tema; este default solo aplica al glifo suelto sin color explícito.
-const DEFAULTS = { size: 24, color: '#1A2332', strokeWidth: 2 } as const;
+const DEFAULTS = { size: 24, strokeWidth: 2 } as const;
 
-const base = (props: IconProps) => {
+// Fallback de color para cuando el consumidor no pasa `color`: `ink` del theme activo (hook — los
+// íconos siempre renderizan bajo el ThemeProvider de App.tsx; sin provider, `useTheme` degrada al
+// passengerTheme, cuyo ink es idéntico). Casi todos los consumidores pasan `color` desde el tema;
+// este default solo aplica al glifo suelto sin color explícito.
+const useIconBase = (props: IconProps) => {
+  const theme = useTheme();
   const size = props.size ?? DEFAULTS.size;
-  const color = props.color ?? DEFAULTS.color;
+  const color = props.color ?? theme.colors.ink;
   const strokeWidth = props.strokeWidth ?? DEFAULTS.strokeWidth;
   return { size, color, strokeWidth };
 };
 
 /** Inicio / Mapa: pin de ubicación. */
 export function IconMap(props: IconProps): React.JSX.Element {
-  const { size, color, strokeWidth } = base(props);
+  const { size, color, strokeWidth } = useIconBase(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -42,7 +45,7 @@ export function IconMap(props: IconProps): React.JSX.Element {
 
 /** Ganancias: barras ascendentes. */
 export function IconEarnings(props: IconProps): React.JSX.Element {
-  const { size, color, strokeWidth } = base(props);
+  const { size, color, strokeWidth } = useIconBase(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path d="M4 20V10" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
@@ -55,7 +58,7 @@ export function IconEarnings(props: IconProps): React.JSX.Element {
 
 /** Viajes: volante. */
 export function IconTrips(props: IconProps): React.JSX.Element {
-  const { size, color, strokeWidth } = base(props);
+  const { size, color, strokeWidth } = useIconBase(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Circle cx={12} cy={12} r={9} stroke={color} strokeWidth={strokeWidth} />
@@ -69,7 +72,7 @@ export function IconTrips(props: IconProps): React.JSX.Element {
 
 /** Compartir / Carpooling: dos personas (viaje compartido, marketplace programado). */
 export function IconCarpool(props: IconProps): React.JSX.Element {
-  const { size, color, strokeWidth } = base(props);
+  const { size, color, strokeWidth } = useIconBase(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Circle cx={8.5} cy={7} r={3.5} stroke={color} strokeWidth={strokeWidth} />
@@ -99,7 +102,7 @@ export function IconCarpool(props: IconProps): React.JSX.Element {
 
 /** Cuenta: persona. */
 export function IconAccount(props: IconProps): React.JSX.Element {
-  const { size, color, strokeWidth } = base(props);
+  const { size, color, strokeWidth } = useIconBase(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Circle cx={12} cy={8} r={4} stroke={color} strokeWidth={strokeWidth} />
@@ -115,7 +118,7 @@ export function IconAccount(props: IconProps): React.JSX.Element {
 
 /** Botón de encendido (Conéctate). */
 export function IconPower(props: IconProps): React.JSX.Element {
-  const { size, color, strokeWidth } = base(props);
+  const { size, color, strokeWidth } = useIconBase(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path d="M12 3v9" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
@@ -131,7 +134,7 @@ export function IconPower(props: IconProps): React.JSX.Element {
 
 /** Teléfono (llamar). */
 export function IconPhone(props: IconProps): React.JSX.Element {
-  const { size, color, strokeWidth } = base(props);
+  const { size, color, strokeWidth } = useIconBase(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -146,7 +149,7 @@ export function IconPhone(props: IconProps): React.JSX.Element {
 
 /** Mensaje. */
 export function IconMessage(props: IconProps): React.JSX.Element {
-  const { size, color, strokeWidth } = base(props);
+  const { size, color, strokeWidth } = useIconBase(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -161,7 +164,7 @@ export function IconMessage(props: IconProps): React.JSX.Element {
 
 /** Flecha de navegación (cursor de ruta). */
 export function IconNavigation(props: IconProps): React.JSX.Element {
-  const { size, color, strokeWidth } = base(props);
+  const { size, color, strokeWidth } = useIconBase(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -177,7 +180,7 @@ export function IconNavigation(props: IconProps): React.JSX.Element {
 
 /** Giro a la derecha (maniobra). */
 export function IconTurnRight(props: IconProps): React.JSX.Element {
-  const { size, color, strokeWidth } = base(props);
+  const { size, color, strokeWidth } = useIconBase(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -238,7 +241,7 @@ const MANEUVER_SHAPES: Record<ManeuverGlyphName, { body: string; head: string }>
  * de un vistazo. `roundabout` añade un anillo; `arrive` un banderín de destino.
  */
 export function IconManeuver(props: IconProps & { glyph: ManeuverGlyphName }): React.JSX.Element {
-  const { size, color, strokeWidth } = base(props);
+  const { size, color, strokeWidth } = useIconBase(props);
   const sw = strokeWidth + 0.3;
   const shape = MANEUVER_SHAPES[props.glyph];
   return (
@@ -284,7 +287,7 @@ export function IconManeuver(props: IconProps & { glyph: ManeuverGlyphName }): R
 
 /** Estrella (rating). */
 export function IconStar(props: IconProps & { filled?: boolean }): React.JSX.Element {
-  const { size, color, strokeWidth } = base(props);
+  const { size, color, strokeWidth } = useIconBase(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -300,7 +303,7 @@ export function IconStar(props: IconProps & { filled?: boolean }): React.JSX.Ele
 
 /** Check (confirmación). */
 export function IconCheck(props: IconProps): React.JSX.Element {
-  const { size, color, strokeWidth } = base(props);
+  const { size, color, strokeWidth } = useIconBase(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Polyline
@@ -317,7 +320,7 @@ export function IconCheck(props: IconProps): React.JSX.Element {
 
 /** Chevron izquierdo (atrás). */
 export function IconChevronLeft(props: IconProps): React.JSX.Element {
-  const { size, color, strokeWidth } = base(props);
+  const { size, color, strokeWidth } = useIconBase(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Polyline
@@ -334,7 +337,7 @@ export function IconChevronLeft(props: IconProps): React.JSX.Element {
 
 /** Chevron derecho (navegar a detalle). */
 export function IconChevronRight(props: IconProps): React.JSX.Element {
-  const { size, color, strokeWidth } = base(props);
+  const { size, color, strokeWidth } = useIconBase(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Polyline
@@ -351,7 +354,7 @@ export function IconChevronRight(props: IconProps): React.JSX.Element {
 
 /** Brújula / recentrar GPS. */
 export function IconLocate(props: IconProps): React.JSX.Element {
-  const { size, color, strokeWidth } = base(props);
+  const { size, color, strokeWidth } = useIconBase(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Circle cx={12} cy={12} r={6} stroke={color} strokeWidth={strokeWidth} />
@@ -368,7 +371,7 @@ export function IconLocate(props: IconProps): React.JSX.Element {
 
 /** Escudo (seguridad / SOS link). */
 export function IconShield(props: IconProps): React.JSX.Element {
-  const { size, color, strokeWidth } = base(props);
+  const { size, color, strokeWidth } = useIconBase(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -383,7 +386,7 @@ export function IconShield(props: IconProps): React.JSX.Element {
 
 /** Reloj (tiempo / horas en línea). */
 export function IconClock(props: IconProps): React.JSX.Element {
-  const { size, color, strokeWidth } = base(props);
+  const { size, color, strokeWidth } = useIconBase(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Circle cx={12} cy={12} r={9} stroke={color} strokeWidth={strokeWidth} />
@@ -401,7 +404,7 @@ export function IconClock(props: IconProps): React.JSX.Element {
 
 /** Sobre/recibo (propinas, documentos). */
 export function IconReceipt(props: IconProps): React.JSX.Element {
-  const { size, color, strokeWidth } = base(props);
+  const { size, color, strokeWidth } = useIconBase(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Rect x={5} y={3} width={14} height={18} rx={1.5} stroke={color} strokeWidth={strokeWidth} />
@@ -417,7 +420,7 @@ export function IconReceipt(props: IconProps): React.JSX.Element {
 
 /** Documento: hoja con esquina doblada (licencia, SOAT, etc.). */
 export function IconDocument(props: IconProps): React.JSX.Element {
-  const { size, color, strokeWidth } = base(props);
+  const { size, color, strokeWidth } = useIconBase(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -434,7 +437,7 @@ export function IconDocument(props: IconProps): React.JSX.Element {
 
 /** Triángulo de alerta (documentos por vencer/vencidos). */
 export function IconAlert(props: IconProps): React.JSX.Element {
-  const { size, color, strokeWidth } = base(props);
+  const { size, color, strokeWidth } = useIconBase(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -451,7 +454,7 @@ export function IconAlert(props: IconProps): React.JSX.Element {
 
 /** Calendario (fecha de vencimiento). */
 export function IconCalendar(props: IconProps): React.JSX.Element {
-  const { size, color, strokeWidth } = base(props);
+  const { size, color, strokeWidth } = useIconBase(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Rect x={3.5} y={5} width={17} height={16} rx={2} stroke={color} strokeWidth={strokeWidth} />
@@ -467,7 +470,7 @@ export function IconCalendar(props: IconProps): React.JSX.Element {
 
 /** Pausa: dos barras verticales (pausar turno). */
 export function IconPause(props: IconProps): React.JSX.Element {
-  const { size, color, strokeWidth } = base(props);
+  const { size, color, strokeWidth } = useIconBase(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path d="M9 4v16M15 4v16" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
@@ -477,7 +480,7 @@ export function IconPause(props: IconProps): React.JSX.Element {
 
 /** Más / añadir (registrar documento). */
 export function IconPlus(props: IconProps): React.JSX.Element {
-  const { size, color, strokeWidth } = base(props);
+  const { size, color, strokeWidth } = useIconBase(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path d="M12 5v14M5 12h14" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
@@ -487,7 +490,7 @@ export function IconPlus(props: IconProps): React.JSX.Element {
 
 /** Menos / restar (stepper de oferta). */
 export function IconMinus(props: IconProps): React.JSX.Element {
-  const { size, color, strokeWidth } = base(props);
+  const { size, color, strokeWidth } = useIconBase(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path d="M5 12h14" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
@@ -497,7 +500,7 @@ export function IconMinus(props: IconProps): React.JSX.Element {
 
 /** Círculo hueco: punto de ORIGEN en resúmenes de ruta (el destino usa el pin `IconMap`). */
 export function IconCircle(props: IconProps): React.JSX.Element {
-  const { size, color, strokeWidth } = base(props);
+  const { size, color, strokeWidth } = useIconBase(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Circle cx={12} cy={12} r={9} stroke={color} strokeWidth={strokeWidth} />
@@ -507,7 +510,7 @@ export function IconCircle(props: IconProps): React.JSX.Element {
 
 /** Tipo de vehículo: Auto (silueta de carrocería con ruedas). */
 export function IconCar(props: IconProps): React.JSX.Element {
-  const { size, color, strokeWidth } = base(props);
+  const { size, color, strokeWidth } = useIconBase(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -532,7 +535,7 @@ export function IconCar(props: IconProps): React.JSX.Element {
 
 /** Tipo de vehículo: Moto (dos ruedas + manubrio). */
 export function IconMoto(props: IconProps): React.JSX.Element {
-  const { size, color, strokeWidth } = base(props);
+  const { size, color, strokeWidth } = useIconBase(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Circle cx={5.5} cy={16} r={3} stroke={color} strokeWidth={strokeWidth} />
@@ -557,7 +560,7 @@ export function IconMoto(props: IconProps): React.JSX.Element {
 
 /** Regalo / bono (incentivo de meta de viajes). */
 export function IconGift(props: IconProps): React.JSX.Element {
-  const { size, color, strokeWidth } = base(props);
+  const { size, color, strokeWidth } = useIconBase(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Rect x={4} y={9} width={16} height={11} rx={1.5} stroke={color} strokeWidth={strokeWidth} />
@@ -574,7 +577,7 @@ export function IconGift(props: IconProps): React.JSX.Element {
 
 /** Rayo (incentivo de hora pico / multiplicador). */
 export function IconBolt(props: IconProps): React.JSX.Element {
-  const { size, color, strokeWidth } = base(props);
+  const { size, color, strokeWidth } = useIconBase(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -590,7 +593,7 @@ export function IconBolt(props: IconProps): React.JSX.Element {
 
 /** Llamas / demanda (toggle de zonas de demanda). */
 export function IconFlame(props: IconProps): React.JSX.Element {
-  const { size, color, strokeWidth } = base(props);
+  const { size, color, strokeWidth } = useIconBase(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -605,7 +608,7 @@ export function IconFlame(props: IconProps): React.JSX.Element {
 
 /** Salvavidas / ayuda (centro de soporte). */
 export function IconLifebuoy(props: IconProps): React.JSX.Element {
-  const { size, color, strokeWidth } = base(props);
+  const { size, color, strokeWidth } = useIconBase(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Circle cx={12} cy={12} r={9} stroke={color} strokeWidth={strokeWidth} />
@@ -622,7 +625,7 @@ export function IconLifebuoy(props: IconProps): React.JSX.Element {
 
 /** Cámara (tomar foto): cuerpo redondeado simple + círculo de lente, sin detalle de fuelle/flash. */
 export function IconCamera(props: IconProps): React.JSX.Element {
-  const { size, color, strokeWidth } = base(props);
+  const { size, color, strokeWidth } = useIconBase(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -638,7 +641,7 @@ export function IconCamera(props: IconProps): React.JSX.Element {
 
 /** Candado cerrado: dato bloqueado (campo KYC no editable). */
 export function IconLock(props: IconProps): React.JSX.Element {
-  const { size, color, strokeWidth } = base(props);
+  const { size, color, strokeWidth } = useIconBase(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Rect x={5} y={11} width={14} height={9} rx={2} stroke={color} strokeWidth={strokeWidth} />
@@ -654,7 +657,7 @@ export function IconLock(props: IconProps): React.JSX.Element {
 
 /** Flecha izquierda (retroceso de pantalla). */
 export function IconArrowLeft(props: IconProps): React.JSX.Element {
-  const { size, color, strokeWidth } = base(props);
+  const { size, color, strokeWidth } = useIconBase(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path d="M19 12H5" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
@@ -672,7 +675,7 @@ export function IconArrowLeft(props: IconProps): React.JSX.Element {
 
 /** Flecha derecha (enviar mensaje del chat — espejo de IconArrowLeft). */
 export function IconArrowRight(props: IconProps): React.JSX.Element {
-  const { size, color, strokeWidth } = base(props);
+  const { size, color, strokeWidth } = useIconBase(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path d="M5 12h14" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
@@ -690,7 +693,7 @@ export function IconArrowRight(props: IconProps): React.JSX.Element {
 
 /** Imagen / galería: marco + un círculo (sol) + una línea mínima de "montaña". */
 export function IconImage(props: IconProps): React.JSX.Element {
-  const { size, color, strokeWidth } = base(props);
+  const { size, color, strokeWidth } = useIconBase(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Rect
@@ -716,7 +719,7 @@ export function IconImage(props: IconProps): React.JSX.Element {
 
 /** Escanear documento: 4 corchetes de esquina + línea central de barrido (sin marco de cámara). */
 export function IconScan(props: IconProps): React.JSX.Element {
-  const { size, color, strokeWidth } = base(props);
+  const { size, color, strokeWidth } = useIconBase(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -754,7 +757,7 @@ export function IconScan(props: IconProps): React.JSX.Element {
 
 /** Campana (notificaciones / avisos): cuerpo + badajo. */
 export function IconBell(props: IconProps): React.JSX.Element {
-  const { size, color, strokeWidth } = base(props);
+  const { size, color, strokeWidth } = useIconBase(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -775,7 +778,7 @@ export function IconBell(props: IconProps): React.JSX.Element {
 
 /** Banderín a la derecha (cierre de turno / meta): mástil + triángulo. Espeja lucide `flag-triangle-right`. */
 export function IconFlag(props: IconProps): React.JSX.Element {
-  const { size, color, strokeWidth } = base(props);
+  const { size, color, strokeWidth } = useIconBase(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -791,7 +794,7 @@ export function IconFlag(props: IconProps): React.JSX.Element {
 
 /** Recorrido / ruta: dos nodos unidos por un trazo con quiebre. Espeja lucide `route`. */
 export function IconRoute(props: IconProps): React.JSX.Element {
-  const { size, color, strokeWidth } = base(props);
+  const { size, color, strokeWidth } = useIconBase(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Circle cx={6} cy={19} r={3} stroke={color} strokeWidth={strokeWidth} />
@@ -809,7 +812,7 @@ export function IconRoute(props: IconProps): React.JSX.Element {
 
 /** Monedas (propinas): dos discos superpuestos. Espeja lucide `coins`. */
 export function IconCoins(props: IconProps): React.JSX.Element {
-  const { size, color, strokeWidth } = base(props);
+  const { size, color, strokeWidth } = useIconBase(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Circle cx={8} cy={8} r={6} stroke={color} strokeWidth={strokeWidth} />
@@ -834,7 +837,7 @@ export function IconCoins(props: IconProps): React.JSX.Element {
 
 /** Rostro escaneado (KYC / biometría): corchetes de esquina + cara mínima (círculo + arco de sonrisa). */
 export function IconFace(props: IconProps): React.JSX.Element {
-  const { size, color, strokeWidth } = base(props);
+  const { size, color, strokeWidth } = useIconBase(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -856,7 +859,7 @@ export function IconFace(props: IconProps): React.JSX.Element {
 
 /** Wifi tachado (sin conexión): arcos de señal rotos + diagonal. Espeja lucide `wifi-off`. */
 export function IconWifiOff(props: IconProps): React.JSX.Element {
-  const { size, color, strokeWidth } = base(props);
+  const { size, color, strokeWidth } = useIconBase(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -897,7 +900,7 @@ export function IconWifiOff(props: IconProps): React.JSX.Element {
 
 /** Pin de ubicación tachado (GPS/permiso denegado): pin roto + diagonal. Espeja lucide `map-pin-off`. */
 export function IconMapPinOff(props: IconProps): React.JSX.Element {
-  const { size, color, strokeWidth } = base(props);
+  const { size, color, strokeWidth } = useIconBase(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -934,7 +937,7 @@ export function IconMapPinOff(props: IconProps): React.JSX.Element {
 
 /** Monitor/dispositivo tachado (sesión cerrada en otro equipo): pantalla + pie + diagonal. */
 export function IconMonitorOff(props: IconProps): React.JSX.Element {
-  const { size, color, strokeWidth } = base(props);
+  const { size, color, strokeWidth } = useIconBase(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -965,7 +968,7 @@ export function IconMonitorOff(props: IconProps): React.JSX.Element {
 
 /** Búsqueda: lupa. */
 export function IconSearch(props: IconProps): React.JSX.Element {
-  const { size, color, strokeWidth } = base(props);
+  const { size, color, strokeWidth } = useIconBase(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Circle cx={11} cy={11} r={7} stroke={color} strokeWidth={strokeWidth} />
@@ -981,7 +984,7 @@ export function IconSearch(props: IconProps): React.JSX.Element {
 
 /** Más acciones: tres puntos horizontales (⋯). */
 export function IconMore(props: IconProps): React.JSX.Element {
-  const { size, color } = base(props);
+  const { size, color } = useIconBase(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Circle cx={5} cy={12} r={1.7} fill={color} />
@@ -993,7 +996,7 @@ export function IconMore(props: IconProps): React.JSX.Element {
 
 /** Enviar / avión de papel: CTA "Enviar código" (OTP). Espeja lucide `send`. */
 export function IconSend(props: IconProps): React.JSX.Element {
-  const { size, color, strokeWidth } = base(props);
+  const { size, color, strokeWidth } = useIconBase(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -1016,7 +1019,7 @@ export function IconSend(props: IconProps): React.JSX.Element {
 
 /** Check dentro de círculo (confirmación fuerte): CTA "Verificar e ingresar". Espeja lucide `circle-check`. */
 export function IconCheckCircle(props: IconProps): React.JSX.Element {
-  const { size, color, strokeWidth } = base(props);
+  const { size, color, strokeWidth } = useIconBase(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Circle cx={12} cy={12} r={9} stroke={color} strokeWidth={strokeWidth} />
@@ -1034,7 +1037,7 @@ export function IconCheckCircle(props: IconProps): React.JSX.Element {
 
 /** Alerta dentro de círculo (error inline del OTP): "Código incorrecto". Espeja lucide `circle-alert`. */
 export function IconAlertCircle(props: IconProps): React.JSX.Element {
-  const { size, color, strokeWidth } = base(props);
+  const { size, color, strokeWidth } = useIconBase(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Circle cx={12} cy={12} r={9} stroke={color} strokeWidth={strokeWidth} />
@@ -1046,7 +1049,7 @@ export function IconAlertCircle(props: IconProps): React.JSX.Element {
 
 /** Salir de sesión: puerta con flecha saliente. Espeja lucide `log-out`. */
 export function IconLogout(props: IconProps): React.JSX.Element {
-  const { size, color, strokeWidth } = base(props);
+  const { size, color, strokeWidth } = useIconBase(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -1071,7 +1074,7 @@ export function IconLogout(props: IconProps): React.JSX.Element {
 
 /** Eliminar cuenta / borrar: tacho con tapa (mismo glifo que el pasajero, `IconTrash`). */
 export function IconTrash(props: IconProps): React.JSX.Element {
-  const { size, color, strokeWidth } = base(props);
+  const { size, color, strokeWidth } = useIconBase(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path d="M4 7h16" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
@@ -1093,7 +1096,7 @@ export function IconTrash(props: IconProps): React.JSX.Element {
 
 /** Reto / objetivo: diana (círculos concéntricos). */
 export function IconTarget(props: IconProps): React.JSX.Element {
-  const { size, color, strokeWidth } = base(props);
+  const { size, color, strokeWidth } = useIconBase(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Circle cx={12} cy={12} r={10} stroke={color} strokeWidth={strokeWidth} />
@@ -1105,7 +1108,7 @@ export function IconTarget(props: IconProps): React.JSX.Element {
 
 /** Soporte / chatear: auricular con micrófono. */
 export function IconHeadset(props: IconProps): React.JSX.Element {
-  const { size, color, strokeWidth } = base(props);
+  const { size, color, strokeWidth } = useIconBase(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -1128,7 +1131,7 @@ export function IconHeadset(props: IconProps): React.JSX.Element {
 
 /** Verificado: insignia festoneada con check. */
 export function IconBadgeCheck(props: IconProps): React.JSX.Element {
-  const { size, color, strokeWidth } = base(props);
+  const { size, color, strokeWidth } = useIconBase(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
@@ -1150,7 +1153,7 @@ export function IconBadgeCheck(props: IconProps): React.JSX.Element {
 
 /** Buscar pasajero: usuario redondo con lupa. */
 export function IconUserRoundSearch(props: IconProps): React.JSX.Element {
-  const { size, color, strokeWidth } = base(props);
+  const { size, color, strokeWidth } = useIconBase(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
